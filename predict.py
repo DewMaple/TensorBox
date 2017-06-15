@@ -81,7 +81,7 @@ def hot_predict(image_path, parameters, to_json=True):
 
     # predict
     orig_img = imread(image_path)[:, :, :3]
-    img = Rotate90.do(orig_img) if 'rotate90' in H['data'] and H['data']['rotate90'] else orig_img
+    img = Rotate90.do(orig_img)[0] if 'rotate90' in H['data'] and H['data']['rotate90'] else orig_img
     img = imresize(img, (H['image_height'], H['image_width']), interp='cubic')
     np_pred_boxes, np_pred_confidences = parameters['sess']. \
         run([parameters['pred_boxes'], parameters['pred_confidences']], feed_dict={parameters['x_in']: img})
@@ -100,11 +100,12 @@ def postprocess(image_info, np_pred_boxes, np_pred_confidences, H, options):
                               rnn_len=H['rnn_len'], min_conf=options['min_conf'], tau=options['tau'],
                               show_suppressed=False)
 
-    rects = [r for r in rects if r.x1 < r.x2 and r.y1 < r.y2 and r.score > options['min_conf']]
     h, w = image_info['original'].shape[:2]
     if 'rotate90' in H['data'] and H['data']['rotate90']:
-        # original image height is a width for roatated one
+        # original image height is a width for rotated one
         rects = Rotate90.invert(h, rects)
+
+    rects = [r for r in rects if r.x1 < r.x2 and r.y1 < r.y2 and r.score > options['min_conf']]
     pred_anno.rects = rects
     pred_anno = rescale_boxes((H['image_height'], H['image_width']), pred_anno, h, w)
     return pred_anno

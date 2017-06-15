@@ -259,4 +259,9 @@ class Rotate90(object):
         Returns (list):
             The list of annotations for original image.
         """
-        return [al.AnnoRect(width - r.y2, r.x1, width - r.y1, r.x2) for r in rects]
+        def inv(r):
+            rotated_back = al.AnnoRect(width - r.y2, r.x1, width - r.y1, r.x2)
+            rotated_back.score = r.score
+            return rotated_back
+
+        return [inv(r) for r in rects]

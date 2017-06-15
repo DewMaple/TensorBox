@@ -15,6 +15,7 @@ First, [install TensorFlow from source or pip](https://www.tensorflow.org/versio
     $ git clone http://github.com/russell91/tensorbox
     $ cd tensorbox
     $ ./download_data.sh
+    $ cd /path/to/tensorbox && pip install -r requirements.txt
     $ cd /path/to/tensorbox/utils && make && cd ..
     $ python train.py --hypes hypes/overfeat_rezoom.json --gpu 0 --logdir output
     $ #see evaluation instructions below
@@ -32,11 +33,12 @@ See <a href="http://arxiv.org/abs/1506.04878" target="_blank">the paper</a> for 
     $ git clone http://github.com/russell91/tensorbox
     $ cd tensorbox
     $ ./download_data.sh
-    
+
     $ # Download the cudnn version used by your tensorflow verion and 
     $ # put the libcudnn*.so files on your LD_LIBRARY_PATH e.g.
     $ cp /path/to/appropriate/cudnn/lib64/* /usr/local/cuda/lib64
 
+    $ cd /path/to/tensorbox && pip install -r requirements.txt
     $ cd /path/to/tensorbox/utils && make && make hungarian && cd ..
     $ python train.py --hypes hypes/lstm_rezoom.json --gpu 0 --logdir output
     $ #see evaluation instructions below
