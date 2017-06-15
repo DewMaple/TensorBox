@@ -5,6 +5,7 @@ import cv2
 import itertools
 from scipy.misc import imread, imresize
 import tensorflow as tf
+from copy import deepcopy
 
 from data_utils import annotation_jitter, annotation_to_h5, Rotate90, Augmentations
 from utils.annolist import AnnotationLib as al
@@ -18,8 +19,17 @@ def preprocess_image(anno, H):
     if len(image.shape) < 3:
         return []
 
+    # 4 channels images check
+    if image.shape[2] == 4:
+        image = image[:, :, :3]
+
     if 'rotate90' in H['data'] and H['data']['rotate90']:
         image, anno = Rotate90.do(image, anno)
+
+    if image.shape[0] != H["image_height"] or image.shape[1] != H["image_width"]:
+        anno = rescale_boxes(image.shape, anno, H["image_height"], H["image_width"])
+        image = imresize(image, (H["image_height"], H["image_width"]), interp='cubic')
+
     result = [(image, anno)]
     if 'augmentations' in H['data']:
         new_res = []
@@ -65,15 +75,8 @@ def load_idl_tf(idlfile, H, jitter):
     for epoch in itertools.count():
         random.shuffle(annos)
         for origin_anno in annos:
-            tiles = preprocess_image(origin_anno, H)
+            tiles = preprocess_image(deepcopy(origin_anno), H)
             for I, anno in tiles:
-                if I.shape[2] == 4:
-                    I = I[:, :, :3]
-                if I.shape[0] != H["image_height"] or I.shape[1] != H["image_width"]:
-                    # if epoch == 0:
-                    anno = rescale_boxes(I.shape, anno, H["image_height"], H["image_width"])
-                    I = imresize(I, (H["image_height"], H["image_width"]), interp='cubic')
-                    # draw_boxes(I, anno)
                 if jitter:
                     jitter_scale_min=0.9
                     jitter_scale_max=1.1
