@@ -726,6 +726,11 @@ def parseJSON(filename):
     with open(filename, 'r') as f:
         jdoc = json.load(f)
 
+    # support new json-format
+    classes = jdoc['classes'] if 'classes' in jdoc else ['background', 'object']
+    if 'images' in jdoc:
+        jdoc = jdoc['images']
+
     for annotation in jdoc:
         anno = Annotation()
         anno.imageName = annotation["image_path"]
@@ -746,7 +751,7 @@ def parseJSON(filename):
         anno.rects = rects
         annotations.append(anno)
 
-    return annotations
+    return annotations, classes
     
 def parse(filename, abs_path=False):
     #print "Parsing: ", filename
@@ -760,11 +765,11 @@ def parse(filename, abs_path=False):
     elif(ext == ".al"):
         annolist = parseXML(filename)
     elif(ext == ".pal"):
-        annolist = PalLib.pal2al(PalLib.loadPal(filename));
+        annolist = PalLib.pal2al(PalLib.loadPal(filename))
     elif(ext == ".json"):
-        annolist = parseJSON(filename)
+        annolist, classes = parseJSON(filename)
     else:
-        annolist = AnnoList([]);
+        annolist = AnnoList([])
 
     if abs_path:
         basedir = os.path.dirname(os.path.abspath(filename))
