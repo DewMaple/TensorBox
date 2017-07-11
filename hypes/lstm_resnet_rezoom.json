@@ -45,5 +45,12 @@
     "deconv": false,
     "num_classes": 2,
     "use_lstm": true,
-    "rnn_len": 5
+    "rnn_len": 5,
+    "sliding_predict": {
+        "sliding_window": true,
+        "step": 960,
+        "overlap" : 480,
+        "nms": true,
+        "iou_min": 0.5
+    },
 }

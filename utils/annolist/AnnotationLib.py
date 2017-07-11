@@ -224,6 +224,14 @@ class AnnoRect(object):
     def bottom(self):
         return max(self.y1, self.y2)
 
+    def area(self):
+        return self.width() * self.height()
+
+    def iou(self, other):
+        w, h = self.intersection(other)
+        inter_area = w * h
+        return inter_area / (self.area() + other.area() - inter_area)
+
     def forceAspectRatio(self, ratio, KeepHeight = False, KeepWidth = False):
         """force the Aspect ratio"""
         if KeepWidth or ((not KeepHeight) and self.width() * 1.0 / self.height() > ratio):

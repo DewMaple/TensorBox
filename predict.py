@@ -1,11 +1,11 @@
-'''
+"""
 This file is designed for prediction of bounding boxes for a single image.
 
 Predictions could be made in two ways: command line style or service style. Command line style denotes that one can 
 run this script from the command line and configure all options right in the command line. Service style allows 
 to call :func:`initialize` function once and call :func:`hot_predict` function as many times as it needed to. 
 
-'''
+"""
 
 import tensorflow as tf
 import os, json, subprocess, random
@@ -25,11 +25,9 @@ if __package__ is None:
     import sys
     sys.path.append(path.abspath(path.join(path.dirname(__file__), path.pardir, 'detect-widgets/additional')))
 
-from geometry import iou
-
 
 def initialize(weights_path, hypes_path, options=None):
-    '''Initialize prediction process.
+    """Initialize prediction process.
 
     All long running operations like TensorFlow session start and weights loading are made here.
 
@@ -42,7 +40,7 @@ def initialize(weights_path, hypes_path, options=None):
         The dict object which contains `sess` - TensorFlow session, `pred_boxes` - predicted boxes Tensor, 
           `pred_confidences` - predicted confidences Tensor, `x_in` - input image Tensor, 
           `hypes` - hyperparametets dictionary.
-    '''
+    """
 
     H = prepare_options(hypes_path, options)
 
@@ -64,12 +62,11 @@ def initialize(weights_path, hypes_path, options=None):
     sess = tf.Session()
     sess.run(tf.initialize_all_variables())
     saver.restore(sess, weights_path)
-    return {'sess': sess, 'pred_boxes': pred_boxes, 'pred_confidences': pred_confidences, 'x_in': x_in, 'hypes': H,
-            'sliding_predict': options['sliding_predict'], 'classID': options['classID']}
+    return {'sess': sess, 'pred_boxes': pred_boxes, 'pred_confidences': pred_confidences, 'x_in': x_in, 'hypes': H}
 
 
 def hot_predict(image_path, parameters, to_json=True, verbose=False):
-    '''Makes predictions when all long running preparation operations are made.
+    """Makes predictions when all long running preparation operations are made.
 
     Args:
         image_path (string): The path to the source image.
@@ -77,7 +74,7 @@ def hot_predict(image_path, parameters, to_json=True, verbose=False):
 
     Returns (Annotation):
         The annotation for the source image.
-    '''
+    """
 
     H = parameters['hypes']
     # The default options for prediction of bounding boxes.
@@ -88,36 +85,31 @@ def hot_predict(image_path, parameters, to_json=True, verbose=False):
             options[key] = val
 
     # predict
-    if 'sliding_predict' in parameters and 'sliding_window' in parameters['sliding_predict'] and parameters['sliding_predict']['sliding_window']:
+    use_sliding_window = H.get('sliding_predict', {'sliding_window': False}).get('sliding_window', False)
+    if use_sliding_window:
         if verbose:
-            print('sliding')
-        return sliding_predict(image_path, parameters, H, options)
+            print('Sliding window mode on')
+        return sliding_predict(image_path, parameters, to_json, H, options)
     else:
         if verbose:
-            print('regular')
+            print('Sliding window mode off')
         return regular_predict(image_path, parameters, to_json, H, options)
 
 
 def calculate_medium_box(boxes):
-    x1, y1, x2, y2, conf_sum = 0, 0, 0, 0, 0
-    new_box = {}
-    for box in boxes:
-        x1 = x1 + box['x1'] * box['score']
-        x2 = x2 + box['x2'] * box['score']
-        y1 = y1 + box['y1'] * box['score']
-        y2 = y2 + box['y2'] * box['score']
-        conf_sum = conf_sum + box['score']
-    new_box['x1'] = x1 / conf_sum
-    new_box['x2'] = x2 / conf_sum
-    new_box['y1'] = y1 / conf_sum
-    new_box['y2'] = y2 / conf_sum
-    new_box['classID'] = boxes[0]['classID']
-    new_box['score'] = conf_sum / len(boxes)
+    conf_sum = reduce(lambda t, b: t + b.score, boxes, 0)
+    aggregation = {}
+    for name in ['x1', 'y1', 'x2', 'y2']:
+        aggregation[name] = reduce(lambda t, b: t+b.__dict__[name]*b.score, boxes, 0) / conf_sum
+
+    new_box = al.AnnoRect(**aggregation)
+    new_box.classID = boxes[0].classID
+    new_box.score = conf_sum / len(boxes)
     return new_box
 
 
 def non_maximum_suppression(boxes):
-    conf = [box['score'] for box in boxes]
+    conf = [box.score for box in boxes]
     ind = np.argmax(conf)
     if isinstance(ind, int):
         return boxes[ind]
@@ -133,16 +125,17 @@ def combine_boxes(boxes, iou_min, nms, verbose=False):
         cur_set = set()
         cur_set.add(i)
         for j, neigh_box in enumerate(boxes):
+            iou_val = box.iou(neigh_box)
             if verbose:
-                print(i, j, iou(box, neigh_box))
-            if i != j and iou(box, neigh_box) > iou_min:
+                print(i, j, iou_val )
+            if i != j and iou_val > iou_min:
                 cur_set.add(j)
-        if not len(cur_set):
-            result.append(box)
 
-        if len(cur_set):
+        if len(cur_set) == 0:
+            result.append(box)
+        else:
             for group in neighbours:
-                if len(cur_set.intersection(group)):
+                if len(cur_set.intersection(group)) > 0:
                     neighbours.remove(group)
                     cur_set = cur_set.union(group)
             neighbours.append(cur_set)
@@ -193,27 +186,27 @@ def regular_predict(image_path, parameters, to_json, H, options):
     np_pred_boxes, np_pred_confidences = parameters['sess']. \
         run([parameters['pred_boxes'], parameters['pred_confidences']], feed_dict={parameters['x_in']: img})
 
-    image_info = {'path': image_path, 'original': orig_img, 'transformed': img}
+    image_info = {'path': image_path, 'original_shape': img.shape[:2], 'transformed': img}
     pred_anno = postprocess_regular(image_info, np_pred_boxes, np_pred_confidences, H, options)
     result = [r.writeJSON() for r in pred_anno] if to_json else pred_anno
     return result
 
 
-def sliding_predict(image_path, parameters, H, options):
+def sliding_predict(image_path, parameters, to_json, H, options):
     orig_img = imread(image_path)[:, :, :3]
     height, width, _ = orig_img.shape
     if 'verbose' in parameters and parameters['verbose']:
         print(width, height)
 
-    assert (parameters['sliding_predict']['step'] > parameters['sliding_predict']['overlap'])
+    assert (H['sliding_predict']['step'] > H['sliding_predict']['overlap'])
 
     result = []
     reached_end = False
-    for idx, i in enumerate(range(0, height, parameters['sliding_predict']['step'] - parameters['sliding_predict']['overlap'])):
-        top, bottom = i, min(height, i + parameters['sliding_predict']['step'])
+    for idx, i in enumerate(range(0, height, H['sliding_predict']['step'] - H['sliding_predict']['overlap'])):
+        top, bottom = i, min(height, i + H['sliding_predict']['step'])
         if 'verbose' in parameters and parameters['verbose']:
             print(0, top, width, bottom)
-        if (height <= i + parameters['sliding_predict']['step']):
+        if (height <= i + H['sliding_predict']['step']):
             reached_end = True
 
         img = orig_img[top:bottom, 0:width]
@@ -222,16 +215,14 @@ def sliding_predict(image_path, parameters, H, options):
 
         np_pred_boxes, np_pred_confidences = parameters['sess']. \
             run([parameters['pred_boxes'], parameters['pred_confidences']], feed_dict={parameters['x_in']: img})
-        image_info = {'path': image_path, 'original': orig_img, 'transformed': img}
+        image_info = {'path': image_path, 'original_shape': (bottom-top, width), 'transformed': img}
 
-        slice_height = bottom - top
-        np_pred_boxes = postprocess_single_slice(image_info, parameters, np_pred_boxes, np_pred_confidences, H, options, top, slice_height)
-
+        np_pred_boxes = postprocess_regular(image_info, np_pred_boxes, np_pred_confidences, H, options)
         result.extend(np_pred_boxes)
         if reached_end:
             break
-    result = combine_boxes(result, parameters['sliding_predict']['iou_min'], parameters['sliding_predict']['nms'])
-
+    result = combine_boxes(result, H['sliding_predict']['iou_min'], H['sliding_predict']['nms'])
+    result = [r.writeJSON() for r in result] if to_json else result
     return result
 
 
@@ -243,14 +234,14 @@ def postprocess_single_slice(image_info, parameters, np_pred_boxes, np_pred_conf
                               rnn_len=H['rnn_len'], min_conf=options['min_conf'], tau=options['tau'],
                               show_suppressed=False)
 
-    h, w = image_info['original'].shape[:2]
+    h, w = image_info['original_shape']
     if 'rotate90' in H['data'] and H['data']['rotate90']:
         # original image height is a width for rotated one
-        rects = Rotate90.invert(slice_height, rects)
+        rects = Rotate90.invert(h, rects)
 
     rects = [r for r in rects if r.x1 < r.x2 and r.y1 < r.y2 and r.score > options['min_conf']]
     pred_anno.rects = rects
-    pred_anno = rescale_boxes((slice_height, H['image_width']), pred_anno, h, w)
+    pred_anno = rescale_boxes((H['image_height'], H['image_width']), pred_anno, h, w)
     rects = process_result_boxes(pred_anno.rects, margin, parameters)
     return rects
 
@@ -263,7 +254,7 @@ def postprocess_regular(image_info, np_pred_boxes, np_pred_confidences, H, optio
                               rnn_len=H['rnn_len'], min_conf=options['min_conf'], tau=options['tau'],
                               show_suppressed=False)
 
-    h, w = image_info['original'].shape[:2]
+    h, w = image_info['original_shape']
     if 'rotate90' in H['data'] and H['data']['rotate90']:
         # original image height is a width for rotated one
         rects = Rotate90.invert(h, rects)
@@ -275,7 +266,7 @@ def postprocess_regular(image_info, np_pred_boxes, np_pred_confidences, H, optio
 
 
 def prepare_options(hypes_path='hypes.json', options=None):
-    '''Sets parameters of the prediction process. If evaluate options provided partially, it'll merge them. 
+    """Sets parameters of the prediction process. If evaluate options provided partially, it'll merge them.
     The priority is given to options argument to overwrite the same obtained from the hyperparameters file.
 
     Args:
@@ -284,7 +275,7 @@ def prepare_options(hypes_path='hypes.json', options=None):
 
     Returns (dict):
         The model hyperparameters dictionary.
-    '''
+    """
 
     with open(hypes_path, 'r') as f:
         H = json.load(f)
@@ -309,85 +300,60 @@ def prepare_options(hypes_path='hypes.json', options=None):
     return H
 
 
-def save_results(image_path, anno):
-    '''Saves results of the prediction.
+def save_results(image_path, anno, img=None, fname='result'):
+    """Saves results of the prediction.
 
     Args:
         image_path (string): The path to source image to predict bounding boxes.
-        anno (Annotation): The predicted annotations for source image.
+        anno (Annotation, list): The predicted annotations for source image.
 
     Returns:
         Nothing.
-    '''
+    """
 
     # draw
-    new_img = Image.open(image_path)
+    new_img = Image.open(image_path) if img is None else Image.fromarray(img)
     d = ImageDraw.Draw(new_img)
-    rects = anno['rects'] if type(anno) is dict else anno.rects
+    is_list = type(anno) is list
+    rects = anno if is_list else anno.rects
     for r in rects:
-        d.rectangle([r.left(), r.top(), r.right(), r.bottom()], outline=(255, 0, 0))
+        if is_list:
+            d.rectangle([r['x1'], r['y1'], r['x2'], r['y2']], outline=(255, 0, 0))
+        else:
+            d.rectangle([r.left(), r.top(), r.right(), r.bottom()], outline=(255, 0, 0))
 
     # save
-    fpath = os.path.join(os.path.dirname(image_path), 'result.png')
-    new_img.save(fpath)
-    subprocess.call(['chmod', '777', fpath])
+    prediction_image_path = os.path.join(os.path.dirname(image_path), fname + '.png')
+    new_img.save(prediction_image_path)
+    subprocess.call(['chmod', '644', prediction_image_path])
 
-    fpath = os.path.join(os.path.dirname(image_path), 'result.json')
-    if type(anno) is dict:
-        with open(fpath, 'w') as f:
-            json.dump(anno, f)
+    fpath = os.path.join(os.path.dirname(image_path), fname + '.json')
+    if is_list:
+        json.dump({'image_path': prediction_image_path, 'rects': anno}, open(fpath, 'w'))
     else:
         al.saveJSON(fpath, anno)
-    subprocess.call(['chmod', '777', fpath])
-
-
-def save_results_boxes(src_path, dst_path, rects, classes):
-    '''Saves results of the prediction.
-
-    Args:
-        src_path (string): The path to source image to predict bounding boxes.
-        dst_path (string): The path to source image to predict bounding boxes.
-        rects (list): The collection of boxes to draw on screenshot.
-        classes (list): The collection of classes corresponding their ids 
-
-    Returns: 
-        Nothing.
-    '''
-
-    # draw
-    new_img = Image.open(src_path)
-    draw = ImageDraw.Draw(new_img)
-    for r in rects:
-        draw.text(((r['x1'] + r['x2']) / 2, (r['y1'] + r['y2']) / 2),
-                  text = classes[r['classID']],fill='purple')
-        draw.rectangle([r['x1'], r['y1'], r['x2'], r['y2']], outline=(255, 0, 0))
-    # save
-    new_img.save(dst_path)
-    subprocess.call(['chmod', '644', dst_path])
+    subprocess.call(['chmod', '644', fpath])
 
 
 def main():
-
-    parser = OptionParser(usage='usage: %prog [options] <config>')
+    parser = OptionParser(usage='usage: %prog [options] <image> <hypes>')
     parser.add_option('--gpu', action='store', type='int', default=0)
     parser.add_option('--tau', action='store', type='float', default=0.25)
     parser.add_option('--min_conf', action='store', type='float', default=0.2)
 
     (options, args) = parser.parse_args()
-    if len(args) < 1:
+    if len(args) < 2:
         print ('Provide path configuration json file')
         return
 
-    config = json.load(open(args[0], 'r'))
-    image_filename = '75.jpg'
+    image_filename = args[0]
+    hypes_path = args[1]
+    config = json.load(open(hypes_path, 'r'))
+    weights_path = os.path.join(os.path.dirname(hypes_path), config['solver']['weights'])
 
-    init_params = initialize(config['weights'], config['hypes'], config)
+    init_params = initialize(weights_path, hypes_path)
     pred_anno = hot_predict(image_filename, init_params)
-    classes = ['background', 'banner', 'float_banner', 'logo', 'sitename', 'menu', 'navigation', 'button', 'file',
-               'social', 'socialGroups', 'goods', 'form', 'search', 'header', 'text', 'image', 'video', 'map', 'table',
-               'slider', 'gallery']
-
-    save_results_boxes(image_filename, 'predictions_sliced.png', pred_anno, classes)
+    save_results(image_filename, pred_anno, None, 'predictions_sliced')
 
 
 if __name__ == '__main__':
