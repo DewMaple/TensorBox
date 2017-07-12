@@ -85,7 +85,7 @@ def hot_predict(image_path, parameters, to_json=True, verbose=False):
             options[key] = val
 
     # predict
-    use_sliding_window = H.get('sliding_predict', {'sliding_window': False}).get('sliding_window', False)
+    use_sliding_window = H.get('sliding_predict', {'enable': False}).get('enable', False)
     if use_sliding_window:
         if verbose:
             print('Sliding window mode on')
@@ -151,15 +151,10 @@ def combine_boxes(boxes, iou_min, nms, verbose=False):
     return result
 
 
-def process_result_boxes(pred_anno_rects, margin):
+def shift_boxes(pred_anno_rects, margin):
     for box in pred_anno_rects:
-        if np.isnan(box.x1) or np.isnan(box.x2) or np.isnan(box.y1) or np.isnan(box.y2):
-            del box
         box.y1 += margin
         box.y2 += margin
-    return pred_anno_rects
-
-
 
 
 def to_box(anno_rect, parameters):
@@ -189,22 +184,31 @@ def regular_predict(image_path, parameters, to_json, H, options):
     return result
 
 
+def propose_slides(img_height, slide_height, slide_overlap):
+    slides = []
+    step = slide_height - slide_overlap
+    for top in range(0, img_height - slide_height, step):
+        slides.append((top, top+slide_height))
+    # there is some space left which was not covered by slides; make slide at the bottom of image
+    slides.append((img_height-slide_height, img_height))
+    return slides
+
+
 def sliding_predict(image_path, parameters, to_json, H, options):
     orig_img = imread(image_path)[:, :, :3]
     height, width, _ = orig_img.shape
-    if 'verbose' in parameters and parameters['verbose']:
+    if options.get('verbose', False):
         print(width, height)
 
-    assert (H['sliding_predict']['step'] > H['sliding_predict']['overlap'])
+    sl_win_options = H['sliding_predict']
+    assert (sl_win_options['window_height'] > sl_win_options['overlap'])
+    slides = propose_slides(height, sl_win_options['window_height'], sl_win_options['overlap'])
 
     result = []
-    reached_end = False
-    for idx, i in enumerate(range(0, height, H['sliding_predict']['step'] - H['sliding_predict']['overlap'])):
-        top, bottom = i, min(height, i + H['sliding_predict']['step'])
-        if 'verbose' in parameters and parameters['verbose']:
-            print(0, top, width, bottom)
-        if (height <= i + H['sliding_predict']['step']):
-            reached_end = True
+    for top, bottom in slides:
+        bottom = min(height, top + sl_win_options['window_height'])
+        if options.get('verbose', False):
+            print('Slide: ', 0, top, width, bottom)
 
         img = orig_img[top:bottom, 0:width]
         img = Rotate90.do(img)[0] if 'rotate90' in H['data'] and H['data']['rotate90'] else img
@@ -214,35 +218,13 @@ def sliding_predict(image_path, parameters, to_json, H, options):
             run([parameters['pred_boxes'], parameters['pred_confidences']], feed_dict={parameters['x_in']: img})
         image_info = {'path': image_path, 'original_shape': (bottom-top, width), 'transformed': img, 'a': orig_img[top:bottom, 0:width]}
 
-        np_pred_boxes = postprocess_single_slice(image_info, parameters, np_pred_boxes, np_pred_confidences, H, options, top, idx)
-        result.extend(np_pred_boxes)
+        pred_boxes = postprocess_regular(image_info, np_pred_boxes, np_pred_confidences, H, options)
+        shift_boxes(pred_boxes, top)
+        result.extend(pred_boxes)
 
-        if reached_end:
-            break
-    result = combine_boxes(result, H['sliding_predict']['iou_min'], H['sliding_predict']['nms'])
+    result = combine_boxes(result, sl_win_options['iou_min'], sl_win_options['nms'])
     result = [r.writeJSON() for r in result] if to_json else result
     return result
-
-
-def postprocess_single_slice(image_info, parameters, np_pred_boxes, np_pred_confidences, H, options, margin, idx):
-    pred_anno = al.Annotation()
-    pred_anno.imageName = image_info['path']
-    pred_anno.imagePath = os.path.abspath(image_info['path'])
-    _, rects = add_rectangles(H, [image_info['transformed']], np_pred_confidences, np_pred_boxes, use_stitching=True,
-                              rnn_len=H['rnn_len'], min_conf=options['min_conf'], tau=options['tau'],
-                              show_suppressed=False)
-
-    h, w = image_info['original_shape']
-    if 'rotate90' in H['data'] and H['data']['rotate90']:
-        # original image height is a width for rotated one
-        rects = Rotate90.invert(h, rects)
-
-    rects = [r for r in rects if r.x1 < r.x2 and r.y1 < r.y2 and r.score > options['min_conf']]
-    pred_anno.rects = rects
-    pred_anno = rescale_boxes((H['image_height'], H['image_width']), pred_anno, h, w)
-    save_results('/detect-widgets/tmp/a.jpg', pred_anno, image_info['a'], str(idx))
-    rects = process_result_boxes(pred_anno.rects, margin)
-    return rects
 
 
 def postprocess_regular(image_info, np_pred_boxes, np_pred_confidences, H, options):
@@ -299,19 +281,19 @@ def prepare_options(hypes_path='hypes.json', options=None):
     return H
 
 
-def save_results(image_path, anno, img=None, fname='result'):
+def save_results(image_path, anno, fname='result'):
     """Saves results of the prediction.
 
     Args:
         image_path (string): The path to source image to predict bounding boxes.
-        anno (Annotation, list): The predicted annotations for source image.
+        anno (Annotation, list): The predicted annotations for source image or the list of bounding boxes.
 
     Returns:
         Nothing.
     """
 
     # draw
-    new_img = Image.open(image_path) if img is None else Image.fromarray(img)
+    new_img = Image.open(image_path)
     d = ImageDraw.Draw(new_img)
     is_list = type(anno) is list
     rects = anno if is_list else anno.rects
@@ -351,8 +333,9 @@ def main():
     weights_path = os.path.join(os.path.dirname(hypes_path), config['solver']['weights'])
 
     init_params = initialize(weights_path, hypes_path)
+    init_params['pred_options'] = {'verbose': True}
     pred_anno = hot_predict(image_filename, init_params)
-    save_results(image_filename, pred_anno, None, 'predictions_sliced')
+    save_results(image_filename, pred_anno, 'predictions_sliced')
 
 
 if __name__ == '__main__':
