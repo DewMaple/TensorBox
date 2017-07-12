@@ -151,18 +151,15 @@ def combine_boxes(boxes, iou_min, nms, verbose=False):
     return result
 
 
-def process_result_boxes(pred_anno_rects, margin, parameters):
-    pred_boxes = []
-    for rect in pred_anno_rects:
-        pred_boxes.append(to_box(rect, parameters))
-
-    for box in pred_boxes:
-        if np.isnan(box['x1']) or np.isnan(box['x2']) or np.isnan(box['y1']) or np.isnan(box['y2']):
+def process_result_boxes(pred_anno_rects, margin):
+    for box in pred_anno_rects:
+        if np.isnan(box.x1) or np.isnan(box.x2) or np.isnan(box.y1) or np.isnan(box.y2):
             del box
-        box['y1'] += margin
-        box['y2'] += margin
+        box.y1 += margin
+        box.y2 += margin
+    return pred_anno_rects
 
-    return pred_boxes
+
 
 
 def to_box(anno_rect, parameters):
@@ -215,10 +212,11 @@ def sliding_predict(image_path, parameters, to_json, H, options):
 
         np_pred_boxes, np_pred_confidences = parameters['sess']. \
             run([parameters['pred_boxes'], parameters['pred_confidences']], feed_dict={parameters['x_in']: img})
-        image_info = {'path': image_path, 'original_shape': (bottom-top, width), 'transformed': img}
+        image_info = {'path': image_path, 'original_shape': (bottom-top, width), 'transformed': img, 'a': orig_img[top:bottom, 0:width]}
 
-        np_pred_boxes = postprocess_regular(image_info, np_pred_boxes, np_pred_confidences, H, options)
+        np_pred_boxes = postprocess_single_slice(image_info, parameters, np_pred_boxes, np_pred_confidences, H, options, top, idx)
         result.extend(np_pred_boxes)
+
         if reached_end:
             break
     result = combine_boxes(result, H['sliding_predict']['iou_min'], H['sliding_predict']['nms'])
@@ -226,7 +224,7 @@ def sliding_predict(image_path, parameters, to_json, H, options):
     return result
 
 
-def postprocess_single_slice(image_info, parameters, np_pred_boxes, np_pred_confidences, H, options, margin, slice_height):
+def postprocess_single_slice(image_info, parameters, np_pred_boxes, np_pred_confidences, H, options, margin, idx):
     pred_anno = al.Annotation()
     pred_anno.imageName = image_info['path']
     pred_anno.imagePath = os.path.abspath(image_info['path'])
@@ -242,7 +240,8 @@ def postprocess_single_slice(image_info, parameters, np_pred_boxes, np_pred_conf
     rects = [r for r in rects if r.x1 < r.x2 and r.y1 < r.y2 and r.score > options['min_conf']]
     pred_anno.rects = rects
     pred_anno = rescale_boxes((H['image_height'], H['image_width']), pred_anno, h, w)
-    rects = process_result_boxes(pred_anno.rects, margin, parameters)
+    save_results('/detect-widgets/tmp/a.jpg', pred_anno, image_info['a'], str(idx))
+    rects = process_result_boxes(pred_anno.rects, margin)
     return rects
 
 
