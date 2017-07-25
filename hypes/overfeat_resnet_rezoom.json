@@ -45,5 +45,18 @@
     "lstm_size": 500,
     "deconv": false,
     "num_classes": 2,
-    "rnn_len": 1
+    "rnn_len": 1,
+    "sliding_predict": {
+        "sliding_window": true,
+        "step": 960,
+        "overlap" : 480,
+        "nms": true,
+        "iou_min": 0.5
+    },
+    "evaluate": {
+        "gpu": 0,
+        "tau": 0.2,
+        "min_conf": 0.4,
+        "show_suppressed": "False"
+    }
 }

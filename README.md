@@ -45,7 +45,7 @@ See <a href="http://arxiv.org/abs/1506.04878" target="_blank">the paper</a> for 
 
 ## Evaluation
 
-There are two options for evaluation, an ipython notebook and a python script.
+There are tree options for evaluation: an ipython notebook and two different python scripts.
 
 ### IPython Notebook
 The [ipython notebook](https://github.com/Russell91/tensorbox/blob/master/evaluate.ipynb)
@@ -53,7 +53,7 @@ allows you to interactively modify the inference algorithm, and can be run concu
 with training (assuming you have 2 gpus). You can evaluate on new data by modifying paths
 and pointing to new weights.
 
-### Python script
+### Evaluation python script
 For those who would prefer to evaluate using a script, you can alternately use evaluate.py.
 The following instructions demonstrate how evaluate.py wase used after one of my experiments -
 you will need to change paths as appropriate:
@@ -68,6 +68,26 @@ you will need to change paths as appropriate:
     $ python -m SimpleHTTPServer 8080 # set up a image server to view the images from your browser
     $ ssh myserver -N -L localhost:8080:localhost:8080 # set up an ssh tunnel to your server (skip if running locally)
     $ # open firefox and visit localhost:8080 to view images
+
+### Prediction python script
+Script predict.py is designed for those who prefer to use routines in your own scripts or wish to run detection for a
+single image only. To simply detect objects on a single image from command line run the following:
+
+    $ python predict.py image.jpg hypes.json
+
+To write your own script which loads model and runs detection for some set of images pay attention to
+`initialize` and `hot_predict` routines.
+
+Note: There are three hyperparameters which should be provided. One can do it using commandline or hyperparameters file.
+The hyperparameters file (hypes.json in example above) should contain the 'evaluate' section as follows:
+```json
+"evaluate": {
+    "gpu": 0,
+    "tau": 0.2,
+    "min_conf": 0.4
+}
+```
+To use CPU one should omit the "gpu" option.
 
 ## Finetuning
 

@@ -43,6 +43,8 @@ def initialize(weights_path, hypes_path, options=None):
     """
 
     H = prepare_options(hypes_path, options)
+    if H is None:
+        return None
 
     tf.reset_default_graph()
     x_in = tf.placeholder(tf.float32, name='x_in', shape=[H['image_height'], H['image_width'], 3])
@@ -76,7 +78,10 @@ def hot_predict(image_path, parameters, to_json=True, verbose=False):
         The annotation for the source image.
     """
 
-    H = parameters['hypes']
+    H = parameters.get('hypes', None)
+    if H is None:
+        return None
+
     # The default options for prediction of bounding boxes.
     options = H['evaluate']
     if 'pred_options' in parameters:
@@ -277,7 +282,8 @@ def prepare_options(hypes_path='hypes.json', options=None):
         for key, val in options.items():
             H['evaluate'][key] = val
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(H['evaluate']['gpu'])
+    if H['evaluate'].get('gpu', False):
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(H['evaluate']['gpu'])
     return H
 
 
@@ -331,8 +337,7 @@ def main():
     hypes_path = args[1]
     config = json.load(open(hypes_path, 'r'))
     weights_path = os.path.join(os.path.dirname(hypes_path), config['solver']['weights'])
-
-    init_params = initialize(weights_path, hypes_path)
+    init_params = initialize(weights_path, hypes_path, options)
     init_params['pred_options'] = {'verbose': True}
     pred_anno = hot_predict(image_filename, init_params)
     save_results(image_filename, pred_anno, 'predictions_sliced')
