@@ -649,7 +649,7 @@ class HungarianOp : public OpKernel {
             match_cost[idx] += fabs(pred_value - label_value) / 2000.;
             loss_mat[idx] += fabs(pred_value - label_value);
           }
-          assert(match_cost[idx] < 0.9);
+          //assert(match_cost[idx] < 0.9);
           match_cost[idx] += i;
           const int c_x = 0;
           const int c_y = 1;

@@ -22,6 +22,8 @@ def get_image_dir(args):
 
 def get_results(args, H):
     tf.reset_default_graph()
+    H["grid_width"] = H["image_width"] / H["region_size"]
+    H["grid_height"] = H["image_height"] / H["region_size"]
     x_in = tf.placeholder(tf.float32, name='x_in', shape=[H['image_height'], H['image_width'], 3])
     if H['use_rezoom']:
         pred_boxes, pred_logits, pred_confidences, pred_confs_deltas, pred_boxes_deltas = build_forward(H, tf.expand_dims(x_in, 0), 'test', reuse=None)

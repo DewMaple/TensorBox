@@ -4,4 +4,8 @@ output/*
 *.swp
 *.so
 inception/*
-hypes/*.json
+frozen_graphs/*
+graphs/*
+annos/*
+csv/*
+screens/*

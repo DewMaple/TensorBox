@@ -2,16 +2,14 @@
 
 <img src="https://travis-ci.org/TensorBox/TensorBox.svg?branch=master"></img>
 
-TensorBox is a simple framework for training neural networks to detect objects in images. 
+TensorBox is a project for training neural networks to detect objects in images. 
 Training requires a json file (e.g. [here](http://russellsstewart.com/s/tensorbox/test_boxes.json))
 containing a list of images and the bounding boxes in each image.
-The basic model implements the simple and robust GoogLeNet-OverFeat algorithm. We additionally provide an implementation of the 
-[ReInspect](https://github.com/Russell91/ReInspect/)
-algorithm, reproducing state-of-the-art detection results on the highly occluded TUD crossing and brainwash datasets.
+The basic model implements the simple and robust GoogLeNet-OverFeat algorithm with attention.
 
 ## OverFeat Installation & Training
-First, [install TensorFlow from source or pip](https://www.tensorflow.org/versions/r0.11/get_started/os_setup.html#pip-installation) (NB: source installs currently break threading on 0.11)
-    
+First, [install TensorFlow from source or pip](https://www.tensorflow.org/versions/r1.2/install/) (NB: source installs currently break threading on 1.2)
+
     $ git clone http://github.com/russell91/tensorbox
     $ cd tensorbox
     $ ./download_data.sh
@@ -19,41 +17,39 @@ First, [install TensorFlow from source or pip](https://www.tensorflow.org/versio
     $ python train.py --hypes hypes/overfeat_rezoom.json --gpu 0 --logdir output
     $ #see evaluation instructions below
 
-Note that running on your own dataset should only require modifying the `hypes/overfeat_rezoom.json` file. 
+Note that running on your own dataset should only require modifying the `hypes/overfeat_rezoom.json` file.
 
-## ReInspect Installation & Training
+### Training on your own data
 
-ReInspect, [initially implemented](https://github.com/Russell91/ReInspect) in Caffe,
-is a neural network extension to Overfeat-GoogLeNet in Tensorflow.
-It is designed for high performance object detection in images with heavily overlapping instances.
-See <a href="http://arxiv.org/abs/1506.04878" target="_blank">the paper</a> for details or the <a href="https://www.youtube.com/watch?v=QeWl0h3kQ24" target="_blank">video</a> for a demonstration.
+TensorBox supports several data formats for bounding boxes description (idl, json, ...). The easiest way to fid your dataset is making a json-file description. It could be made using `make_json.py` script or you can convert other annotation description into json. The file formats are described [here](https://github.com/Russell91/TensorBox/blob/master/utils/annolist/readme.md).
 
-    # REQUIRES TENSORFLOW VERSION >= 0.11
-    $ git clone http://github.com/russell91/tensorbox
-    $ cd tensorbox
-    $ ./download_data.sh
-    
-    $ # Download the cudnn version used by your tensorflow verion and 
-    $ # put the libcudnn*.so files on your LD_LIBRARY_PATH e.g.
-    $ cp /path/to/appropriate/cudnn/lib64/* /usr/local/cuda/lib64
+Now you are able to change input size of image in hypes files. Make sure that it is multiple 32.
+Also a couple of experimental and not working models has been added recently.
 
-    $ cd /path/to/tensorbox/utils && make && make hungarian && cd ..
-    $ python train.py --hypes hypes/lstm_rezoom.json --gpu 0 --logdir output
-    $ #see evaluation instructions below
+## ReInspect Installation & Training        
+
+ ReInspect, [initially implemented](https://github.com/Russell91/ReInspect) in Caffe,      
+ is a neural network extension to Overfeat-GoogLeNet in Tensorflow.        
+ It is designed for high performance object detection in images with heavily overlapping instances.        
+ See <a href="http://arxiv.org/abs/1506.04878" target="_blank">the paper</a> for details or the <a href="https://www.youtube.com/watch?v=QeWl0h3kQ24" target="_blank">video</a> for a demonstration.       
+       
+     # REQUIRES TENSORFLOW VERSION >= 1.2     
+     $ git clone http://github.com/russell91/tensorbox     
+     $ cd tensorbox        
+     $ ./download_data.sh      
+           
+     $ # Download the cudnn version used by your tensorflow verion and         
+     $ # put the libcudnn*.so files on your LD_LIBRARY_PATH e.g.       
+     $ cp /path/to/appropriate/cudnn/lib64/* /usr/local/cuda/lib64     
+       
+     $ cd /path/to/tensorbox/utils && make && make hungarian && cd ..      
+     $ python train.py --hypes hypes/lstm_rezoom.json --gpu 0 --logdir output      
+     $ #see evaluation instructions below
 
 ## Evaluation
 
-There are two options for evaluation, an ipython notebook and a python script.
-
-### IPython Notebook
-The [ipython notebook](https://github.com/Russell91/tensorbox/blob/master/evaluate.ipynb)
-allows you to interactively modify the inference algorithm, and can be run concurrently
-with training (assuming you have 2 gpus). You can evaluate on new data by modifying paths
-and pointing to new weights.
-
 ### Python script
-For those who would prefer to evaluate using a script, you can alternately use evaluate.py.
-The following instructions demonstrate how evaluate.py wase used after one of my experiments -
+The following instructions demonstrate how test.py wase used after one of my experiments -
 you will need to change paths as appropriate:
 
     $ # kill training script if you don't have a spare GPU

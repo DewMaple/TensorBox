@@ -28,30 +28,9 @@ np.random.seed(0)
 
 from utils import train_utils, googlenet_load, tf_concat
 
-@ops.RegisterGradient("Hungarian")
-def _hungarian_grad(op, *args):
+@ops.RegisterGradient("Hungarian")     
+def _hungarian_grad(op, *args):       
     return map(array_ops.zeros_like, op.inputs)
-
-def build_lstm_inner(H, lstm_input):
-    '''
-    build lstm decoder
-    '''
-    lstm_cell = rnn_cell.BasicLSTMCell(H['lstm_size'], forget_bias=0.0, state_is_tuple=True)
-    if H['num_lstm_layers'] > 1:
-        lstm = rnn_cell.MultiRNNCell([lstm_cell] * H['num_lstm_layers'], state_is_tuple=True)
-    else:
-        lstm = lstm_cell
-
-    batch_size = H['batch_size'] * H['grid_height'] * H['grid_width']
-    state = lstm.zero_state(batch_size, tf.float32)
-
-    outputs = []
-    with tf.variable_scope('RNN', initializer=tf.random_uniform_initializer(-0.1, 0.1)):
-        for time_step in range(H['rnn_len']):
-            if time_step > 0: tf.get_variable_scope().reuse_variables()
-            output, state = lstm(lstm_input, state)
-            outputs.append(output)
-    return outputs
 
 def build_overfeat_inner(H, lstm_input):
     '''
@@ -64,6 +43,30 @@ def build_overfeat_inner(H, lstm_input):
     with tf.variable_scope('Overfeat', initializer=initializer):
         w = tf.get_variable('ip', shape=[H['later_feat_channels'], H['lstm_size']])
         outputs.append(tf.matmul(lstm_input, w))
+    return outputs
+
+def build_lstm_inner(H, lstm_input):
+    '''
+    build lstm decoder
+    '''
+
+    def get_lstm_cell(H):
+        return rnn_cell.BasicLSTMCell(H['lstm_size'], forget_bias=0.0, state_is_tuple=True, reuse=tf.get_variable_scope().reuse)
+
+    if H['num_lstm_layers'] > 1:
+        lstm = rnn_cell.MultiRNNCell([get_lstm_cell(H) for _ in range(H['num_lstm_layers'])], state_is_tuple=True)
+    else:
+        lstm = get_lstm_cell(H)
+
+    batch_size = H['batch_size'] * H['grid_height'] * H['grid_width']
+    state = lstm.zero_state(batch_size, tf.float32)
+
+    outputs = []
+    with tf.variable_scope('RNN', initializer=tf.random_uniform_initializer(-0.1, 0.1)):
+        for time_step in range(H['rnn_len']):
+            if time_step > 0: tf.get_variable_scope().reuse_variables()
+            output, state = lstm(lstm_input, state)
+            outputs.append(output)
     return outputs
 
 def deconv(x, output_shape, channels):
@@ -152,8 +155,7 @@ def build_forward(H, x, phase, reuse):
         cnn2 = cnn[:, :, :, 700:]
         cnn2 = tf.nn.avg_pool(cnn2, ksize=[1, pool_size, pool_size, 1],
                               strides=[1, 1, 1, 1], padding='SAME')
-        cnn = tf_concat(3, [cnn1, cnn2])
-
+        cnn = tf_concat(3, [cnn1, cnn2])  
     cnn = tf.reshape(cnn,
                      [H['batch_size'] * H['grid_width'] * H['grid_height'], H['later_feat_channels']])
     initializer = tf.random_uniform_initializer(-0.1, 0.1)
@@ -233,7 +235,6 @@ def build_forward_backward(H, x, phase, boxes, flags):
     '''
     Call build_forward() and then setup the loss functions
     '''
-
     grid_size = H['grid_width'] * H['grid_height']
     outer_size = grid_size * H['batch_size']
     reuse = {'train': None, 'test': True}[phase]
@@ -310,10 +311,11 @@ def build(H, q):
     arch = H
     solver = H["solver"]
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(solver.get('gpu', ''))
+    #os.environ['CUDA_VISIBLE_DEVICES'] = str(solver.get('gpu', ''))
 
     #gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)
     gpu_options = tf.GPUOptions()
+    print(gpu_options)
     config = tf.ConfigProto(gpu_options=gpu_options)
 
     learning_rate = tf.placeholder(tf.float32)
@@ -387,7 +389,7 @@ def build(H, q):
 
                 merged = train_utils.add_rectangles(H, np_img, np_confidences, np_boxes,
                                                     use_stitching=True,
-                                                    rnn_len=H['rnn_len'])[0]
+                                                    rnn_len=H['rnn_len'], show_suppressed=True)[0]
 
                 num_images = 10
                 img_path = os.path.join(H['save_dir'], '%s_%s.jpg' % ((np_global_step / H['logging']['display_iter']) % num_images, pred_or_true))
@@ -419,6 +421,9 @@ def train(H, test_images):
     ckpt_file = H['save_dir'] + '/save.ckpt'
     with open(H['save_dir'] + '/hypes.json', 'w') as f:
         json.dump(H, f, indent=4)
+
+    H["grid_width"] = H["image_width"] / H["region_size"]
+    H["grid_height"] = H["image_height"] / H["region_size"]
 
     x_in = tf.placeholder(tf.float32)
     confs_in = tf.placeholder(tf.float32)
@@ -472,10 +477,15 @@ def train(H, test_images):
         if len(weights_str) > 0:
             print('Restoring from: %s' % weights_str)
             saver.restore(sess, weights_str)
-        else:
+        elif H['slim_basename'] == 'MobilenetV1':
+            saver.restore(sess, H['slim_ckpt'])
+        else :
+            gvars = [x for x in tf.global_variables() if x.name.startswith(H['slim_basename']) and H['solver']['opt'] not in x.name]
+            gvars = [x for x in gvars if not x.name.startswith("{}/AuxLogits".format(H['slim_basename']))]
             init_fn = slim.assign_from_checkpoint_fn(
                   '%s/data/%s' % (os.path.dirname(os.path.realpath(__file__)), H['slim_ckpt']),
-                  [x for x in tf.global_variables() if x.name.startswith(H['slim_basename']) and H['solver']['opt'] not in x.name])
+                  gvars,
+                  ignore_missing_vars=False)
             #init_fn = slim.assign_from_checkpoint_fn(
                   #'%s/data/inception_v1.ckpt' % os.path.dirname(os.path.realpath(__file__)),
                   #[x for x in tf.global_variables() if x.name.startswith('InceptionV1') and not H['solver']['opt'] in x.name])
@@ -543,6 +553,7 @@ def main():
         datetime.datetime.now().strftime('%Y_%m_%d_%H.%M'))
     if args.weights is not None:
         H['solver']['weights'] = args.weights
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     train(H, test_images=[])
 
 if __name__ == '__main__':

@@ -11,15 +11,22 @@ from utils.annolist import AnnotationLib as al
 from rect import Rect
 from utils import tf_concat
 
-
-def rescale_boxes(current_shape, anno, target_height, target_width):
+def rescale_boxes(current_shape, anno, target_height, target_width, test=False):
     x_scale = target_width / float(current_shape[1])
     y_scale = target_height / float(current_shape[0])
     for r in anno.rects:
-        assert r.x1 < r.x2  # one of the annotations has negative width!
+        if r.x1 >= r.x2:
+            if test:
+                r.x1, r.x2 = r.x2, r.x1
+            else:   
+                assert r.x1 < r.x2
         r.x1 *= x_scale
         r.x2 *= x_scale
-        assert r.y1 < r.y2  # one of the annotations has negative height!
+        if r.y1 >= r.y2:
+            if test:
+                r.y1, r.y2 = r.y2, r.y1
+            else:   
+                assert r.y1 < r.y2
         r.y1 *= y_scale
         r.y2 *= y_scale
     return anno
@@ -41,30 +48,37 @@ def load_idl_tf(idlfile, H, jitter):
     for epoch in itertools.count():
         random.shuffle(annos)
         for anno in annos:
-            I = imread(anno.imageName)
-            #Skip Greyscale images
-            if len(I.shape) < 3:
-                continue
-            if I.shape[2] == 4:
-                I = I[:, :, :3]
-            if I.shape[0] != H["image_height"] or I.shape[1] != H["image_width"]:
-                if epoch == 0:
-                    anno = rescale_boxes(I.shape, anno, H["image_height"], H["image_width"])
-                I = imresize(I, (H["image_height"], H["image_width"]), interp='cubic')
-            if jitter:
-                jitter_scale_min=0.9
-                jitter_scale_max=1.1
-                jitter_offset=16
-                I, anno = annotation_jitter(I,
-                                            anno, target_width=H["image_width"],
-                                            target_height=H["image_height"],
-                                            jitter_scale_min=jitter_scale_min,
-                                            jitter_scale_max=jitter_scale_max,
-                                            jitter_offset=jitter_offset)
+            try:
+                if H['grayscale']:
+                    I = imread(anno.imageName, mode = 'RGB' if random.random() < H['grayscale_prob'] else 'L')
+                    if len(I.shape) < 3:
+                        I = cv2.cvtColor(I, cv2.COLOR_GRAY2RGB)
+                else:
+                    I = imread(anno.imageName, mode = 'RGB')
+                if I.shape[0] != H["image_height"] or I.shape[1] != H["image_width"]:
+                    if epoch == 0:
+                        anno = rescale_boxes(I.shape, anno, H["image_height"], H["image_width"])
+                    I = imresize(I, (H["image_height"], H["image_width"]), interp='cubic')
+                if jitter:
+                    jitter_scale_min=0.9
+                    jitter_scale_max=1.1
+                    jitter_offset=16
+                    I, anno = annotation_jitter(I,
+                                                anno, target_width=H["image_width"],
+                                                target_height=H["image_height"],
+                                                jitter_scale_min=jitter_scale_min,
+                                                jitter_scale_max=jitter_scale_max,
+                                                jitter_offset=jitter_offset)
 
-            boxes, flags = annotation_to_h5(H, anno)
+                boxes, flags = annotation_to_h5(H,
+                                                anno,
+                                                H["grid_width"],
+                                                H["grid_height"],
+                                                H["rnn_len"])
 
-            yield {"image": I, "boxes": boxes, "flags": flags}
+                yield {"image": I, "boxes": boxes, "flags": flags}
+            except:
+                print("The file is not exist {}".format(anno.imageName))
 
 def make_sparse(n, d):
     v = np.zeros((d,), dtype=np.float32)
@@ -137,7 +151,9 @@ def add_rectangles(H, orig_image, confidences, boxes, use_stitching=False, rnn_l
                     (rect.cx-int(rect.width/2), rect.cy-int(rect.height/2)),
                     (rect.cx+int(rect.width/2), rect.cy+int(rect.height/2)),
                     color,
-                    2)
+                    1)
+
+    cv2.putText(image,str(len(filter(lambda rect:rect.confidence > min_conf, acc_rects))), (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1,(255,255,255),2)
 
     rects = []
     for rect in acc_rects:
