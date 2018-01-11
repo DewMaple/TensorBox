@@ -1,16 +1,17 @@
-import numpy as np
-import random
-import os
-import cv2
 import itertools
-from scipy.misc import imread, imresize
-import tensorflow as tf
+import os
+import random
 from copy import deepcopy
 
-from data_utils import annotation_jitter, annotation_to_h5, Rotate90, Augmentations
-from utils.annolist import AnnotationLib as al
-from rect import Rect
+import cv2
+import numpy as np
+import tensorflow as tf
+from scipy.misc import imread, imresize
+
 from utils import tf_concat
+from utils.annolist import AnnotationLib as al
+from utils.data_utils import annotation_jitter, annotation_to_h5, Rotate90, Augmentations
+from utils.rect import Rect
 
 
 def preprocess_image(anno, H):
@@ -78,9 +79,9 @@ def load_idl_tf(idlfile, H, jitter):
             tiles = preprocess_image(deepcopy(origin_anno), H)
             for I, anno in tiles:
                 if jitter:
-                    jitter_scale_min=0.9
-                    jitter_scale_max=1.1
-                    jitter_offset=16
+                    jitter_scale_min = 0.9
+                    jitter_scale_max = 1.1
+                    jitter_offset = 16
                     I, anno = annotation_jitter(I,
                                                 anno, target_width=H["image_width"],
                                                 target_height=H["image_height"],
@@ -92,10 +93,12 @@ def load_idl_tf(idlfile, H, jitter):
 
                 yield {"image": I, "boxes": boxes, "flags": flags}
 
+
 def make_sparse(n, d):
     v = np.zeros((d,), dtype=np.float32)
     v[n] = 1.
     return v
+
 
 def load_data_gen(H, phase, jitter):
     grid_size = H['grid_width'] * H['grid_height']
@@ -108,16 +111,19 @@ def load_data_gen(H, phase, jitter):
         rnn_len = H["rnn_len"]
         flags = d['flags']
         boxes = d['boxes']
-        assert(flags.shape == (grid_size, rnn_len))
-        assert(boxes.shape == (grid_size, rnn_len, 4))
+        assert (flags.shape == (grid_size, rnn_len))
+        assert (boxes.shape == (grid_size, rnn_len, 4))
 
         output['image'] = d['image']
-        output['confs'] = np.array([[make_sparse(int(detection), d=H['num_classes']) for detection in cell] for cell in flags])
+        output['confs'] = np.array(
+            [[make_sparse(int(detection), d=H['num_classes']) for detection in cell] for cell in flags])
         output['boxes'] = boxes
 
         yield output
 
-def add_rectangles(H, orig_image, confidences, boxes, use_stitching=False, rnn_len=1, min_conf=0.1, show_removed=True, tau=0.25, show_suppressed=True):
+
+def add_rectangles(H, orig_image, confidences, boxes, use_stitching=False, rnn_len=1, min_conf=0.1, show_removed=True,
+                   tau=0.25, show_suppressed=True):
     image = np.copy(orig_image[0])
     boxes_r = np.reshape(boxes, (-1,
                                  H["grid_height"],
@@ -136,8 +142,8 @@ def add_rectangles(H, orig_image, confidences, boxes, use_stitching=False, rnn_l
             for x in range(H["grid_width"]):
                 classID = np.argmax(confidences_r[0, y, x, n, 1:]) + 1
                 bbox = boxes_r[0, y, x, n, :]
-                abs_cx = int(bbox[0]) + cell_pix_size/2 + cell_pix_size * x
-                abs_cy = int(bbox[1]) + cell_pix_size/2 + cell_pix_size * y
+                abs_cx = int(bbox[0]) + cell_pix_size / 2 + cell_pix_size * x
+                abs_cy = int(bbox[1]) + cell_pix_size / 2 + cell_pix_size * y
                 w = bbox[2]
                 h = bbox[3]
                 conf = confidences_r[0, y, x, n, classID]
@@ -158,23 +164,24 @@ def add_rectangles(H, orig_image, confidences, boxes, use_stitching=False, rnn_l
         for rect in rect_set:
             if rect.confidence > min_conf:
                 cv2.rectangle(image,
-                    (rect.cx-int(rect.width/2), rect.cy-int(rect.height/2)),
-                    (rect.cx+int(rect.width/2), rect.cy+int(rect.height/2)),
-                    color,
-                    2)
+                              (rect.cx - int(rect.width / 2), rect.cy - int(rect.height / 2)),
+                              (rect.cx + int(rect.width / 2), rect.cy + int(rect.height / 2)),
+                              color,
+                              2)
 
     rects = []
     for rect in acc_rects:
         r = al.AnnoRect()
-        r.x1 = rect.cx - rect.width/2.
-        r.x2 = rect.cx + rect.width/2.
-        r.y1 = rect.cy - rect.height/2.
-        r.y2 = rect.cy + rect.height/2.
+        r.x1 = rect.cx - rect.width / 2.
+        r.x2 = rect.cx + rect.width / 2.
+        r.y1 = rect.cy - rect.height / 2.
+        r.y2 = rect.cy + rect.height / 2.
         r.score = rect.true_confidence
         r.classID = rect.classID
         rects.append(r)
 
     return image, rects
+
 
 def to_x1y1x2y2(box):
     w = tf.maximum(box[:, 2:3], 1)
@@ -184,6 +191,7 @@ def to_x1y1x2y2(box):
     y1 = box[:, 1:2] - h / 2
     y2 = box[:, 1:2] + h / 2
     return tf_concat(1, [x1, y1, x2, y2])
+
 
 def intersection(box1, box2):
     x1_max = tf.maximum(box1[:, 0], box2[:, 0])
@@ -196,16 +204,20 @@ def intersection(box1, box2):
 
     return x_diff * y_diff
 
+
 def area(box):
     x_diff = tf.maximum(box[:, 2] - box[:, 0], 0)
     y_diff = tf.maximum(box[:, 3] - box[:, 1], 0)
     return x_diff * y_diff
 
+
 def union(box1, box2):
     return area(box1) + area(box2) - intersection(box1, box2)
 
+
 def iou(box1, box2):
     return intersection(box1, box2) / union(box1, box2)
+
 
 def to_idx(vec, w_shape):
     '''
@@ -213,6 +225,7 @@ def to_idx(vec, w_shape):
     w_shape = [n, h, w, c]
     '''
     return vec[:, 2] + w_shape[2] * (vec[:, 1] + w_shape[1] * vec[:, 0])
+
 
 def interp(w, i, channel_dim):
     '''
@@ -233,7 +246,7 @@ def interp(w, i, channel_dim):
         ]
         of the same length == len(i)
     '''
-    w_as_vector = tf.reshape(w, [-1, channel_dim]) # gather expects w to be 1-d
+    w_as_vector = tf.reshape(w, [-1, channel_dim])  # gather expects w to be 1-d
     upper_l = tf.to_int32(tf_concat(1, [i[:, 0:1], tf.floor(i[:, 1:2]), tf.floor(i[:, 2:3])]))
     upper_r = tf.to_int32(tf_concat(1, [i[:, 0:1], tf.floor(i[:, 1:2]), tf.ceil(i[:, 2:3])]))
     lower_l = tf.to_int32(tf_concat(1, [i[:, 0:1], tf.ceil(i[:, 1:2]), tf.floor(i[:, 2:3])]))
@@ -257,6 +270,7 @@ def interp(w, i, channel_dim):
     value = (1 - alpha_ud) * upper_value + (alpha_ud) * lower_value
     return value
 
+
 def bilinear_select(H, pred_boxes, early_feat, early_feat_channels, w_offset, h_offset):
     '''
     Function used for rezooming high level feature maps. Uses bilinear interpolation
@@ -265,8 +279,8 @@ def bilinear_select(H, pred_boxes, early_feat, early_feat_channels, w_offset, h_
     grid_size = H['grid_width'] * H['grid_height']
     outer_size = grid_size * H['batch_size']
 
-    fine_stride = 8. # pixels per 60x80 grid cell in 480x640 image
-    coarse_stride = H['region_size'] # pixels per 15x20 grid cell in 480x640 image
+    fine_stride = 8.  # pixels per 60x80 grid cell in 480x640 image
+    coarse_stride = H['region_size']  # pixels per 15x20 grid cell in 480x640 image
     batch_ids = []
     x_offsets = []
     y_offsets = []
@@ -283,12 +297,12 @@ def bilinear_select(H, pred_boxes, early_feat, early_feat_channels, w_offset, h_
     y_offsets = tf.constant(y_offsets)
 
     pred_boxes_r = tf.reshape(pred_boxes, [outer_size * H['rnn_len'], 4])
-    scale_factor = coarse_stride / fine_stride # scale difference between 15x20 and 60x80 features
+    scale_factor = coarse_stride / fine_stride  # scale difference between 15x20 and 60x80 features
 
     pred_x_center = (pred_boxes_r[:, 0:1] + w_offset * pred_boxes_r[:, 2:3] + x_offsets) / fine_stride
     pred_x_center_clip = tf.clip_by_value(pred_x_center,
-                                     0,
-                                     scale_factor * H['grid_width'] - 1)
+                                          0,
+                                          scale_factor * H['grid_width'] - 1)
     pred_y_center = (pred_boxes_r[:, 1:2] + h_offset * pred_boxes_r[:, 3:4] + y_offsets) / fine_stride
     pred_y_center_clip = tf.clip_by_value(pred_y_center,
                                           0,

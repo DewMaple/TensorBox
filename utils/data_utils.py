@@ -1,10 +1,12 @@
-import cv2
-import numpy as np
 import copy
-import annolist.AnnotationLib as al
-from imgaug import augmenters as iaa
+
+import cv2
 import imgaug as ia
+import numpy as np
+from imgaug import augmenters as iaa
 from scipy.ndimage.interpolation import rotate as imrotate
+
+import utils.annolist.AnnotationLib as al
 
 
 def annotation_to_h5(H, a):
@@ -19,15 +21,15 @@ def annotation_to_h5(H, a):
     cells_per_image = len(cell_regions)
 
     box_list = [[] for idx in range(cells_per_image)]
-            
+
     for cidx, c in enumerate(cell_regions):
         box_list[cidx] = [r for r in a.rects if all(r.intersection(c))]
 
-    boxes = np.zeros((cells_per_image, max_len, 4), dtype = np.float)
-    box_flags = np.zeros((cells_per_image, max_len), dtype = np.float)
+    boxes = np.zeros((cells_per_image, max_len, 4), dtype=np.float)
+    box_flags = np.zeros((cells_per_image, max_len), dtype=np.float)
 
     for cidx in xrange(cells_per_image):
-        #assert(cur_num_boxes <= max_len)
+        # assert(cur_num_boxes <= max_len)
 
         cell_ox = 0.5 * (cell_regions[cidx].x1 + cell_regions[cidx].x2)
         cell_oy = 0.5 * (cell_regions[cidx].y1 + cell_regions[cidx].y2)
@@ -40,25 +42,24 @@ def annotation_to_h5(H, a):
             oy = 0.5 * (box_list[cidx][bidx].y1 + box_list[cidx][bidx].y2) - cell_oy
 
             width = abs(box_list[cidx][bidx].x2 - box_list[cidx][bidx].x1)
-            height= abs(box_list[cidx][bidx].y2 - box_list[cidx][bidx].y1)
-            
+            height = abs(box_list[cidx][bidx].y2 - box_list[cidx][bidx].y1)
+
             if (abs(ox) < H['focus_size'] * region_size and abs(oy) < H['focus_size'] * region_size and
                     width < H['biggest_box_px'] and height < H['biggest_box_px']):
                 unsorted_boxes.append(np.array([ox, oy, width, height], dtype=np.float))
 
-        for bidx, box in enumerate(sorted(unsorted_boxes, key=lambda x: x[0]**2 + x[1]**2)):
-            boxes[cidx, bidx,  :] = box
+        for bidx, box in enumerate(sorted(unsorted_boxes, key=lambda x: x[0] ** 2 + x[1] ** 2)):
+            boxes[cidx, bidx, :] = box
             if H['num_classes'] <= 2:
                 box_flags[cidx, bidx] = max(box_list[cidx][bidx].silhouetteID, 1)
-            else: # multiclass detection
+            else:  # multiclass detection
                 # Note: class 0 reserved for empty boxes
-                box_flags[cidx, bidx] = box_list[cidx][bidx].classID 
+                box_flags[cidx, bidx] = box_list[cidx][bidx].classID
 
     return boxes, box_flags
 
 
 def get_cell_grid(cell_width, cell_height, region_size):
-
     cell_regions = []
     for iy in xrange(cell_height):
         for ix in xrange(cell_width):
@@ -72,11 +73,11 @@ def get_cell_grid(cell_width, cell_height, region_size):
 
             cell_regions.append(r)
 
-
     return cell_regions
 
 
-def annotation_jitter(I, a_in, min_box_width=20, jitter_scale_min=0.9, jitter_scale_max=1.1, jitter_offset=16, target_width=640, target_height=480):
+def annotation_jitter(I, a_in, min_box_width=20, jitter_scale_min=0.9, jitter_scale_max=1.1, jitter_offset=16,
+                      target_width=640, target_height=480):
     a = copy.deepcopy(a_in)
 
     # MA: sanity check
@@ -84,12 +85,11 @@ def annotation_jitter(I, a_in, min_box_width=20, jitter_scale_min=0.9, jitter_sc
     for i in range(len(a.rects)):
         r = a.rects[i]
         try:
-            assert(r.x1 < r.x2 and r.y1 < r.y2)
+            assert (r.x1 < r.x2 and r.y1 < r.y2)
             new_rects.append(r)
         except:
             print('bad rectangle')
     a.rects = new_rects
-
 
     if a.rects:
         cur_min_box_width = min([r.width() for r in a.rects])
@@ -119,18 +119,16 @@ def annotation_jitter(I, a_in, min_box_width=20, jitter_scale_min=0.9, jitter_sc
             for p in r.point:
                 p.x = I.shape[1] - p.x
 
-    I1 = cv2.resize(I, None, fx=jitter_scale, fy=jitter_scale, interpolation = cv2.INTER_CUBIC)
+    I1 = cv2.resize(I, None, fx=jitter_scale, fy=jitter_scale, interpolation=cv2.INTER_CUBIC)
 
     jitter_offset_x = np.random.random_integers(-jitter_offset, jitter_offset)
     jitter_offset_y = np.random.random_integers(-jitter_offset, jitter_offset)
 
-
-
     rescaled_width = I1.shape[1]
     rescaled_height = I1.shape[0]
 
-    px = round(0.5*(target_width)) - round(0.5*(rescaled_width)) + jitter_offset_x
-    py = round(0.5*(target_height)) - round(0.5*(rescaled_height)) + jitter_offset_y
+    px = round(0.5 * (target_width)) - round(0.5 * (rescaled_width)) + jitter_offset_x
+    py = round(0.5 * (target_height)) - round(0.5 * (rescaled_height)) + jitter_offset_y
 
     I2 = np.zeros((target_height, target_width, 3), dtype=I1.dtype)
 
@@ -141,18 +139,18 @@ def annotation_jitter(I, a_in, min_box_width=20, jitter_scale_min=0.9, jitter_sc
 
     I2[0:(y2 - y1), 0:(x2 - x1), :] = I1[y1:y2, x1:x2, :]
 
-    ox1 = round(0.5*rescaled_width) + jitter_offset_x
-    oy1 = round(0.5*rescaled_height) + jitter_offset_y
+    ox1 = round(0.5 * rescaled_width) + jitter_offset_x
+    oy1 = round(0.5 * rescaled_height) + jitter_offset_y
 
-    ox2 = round(0.5*target_width)
-    oy2 = round(0.5*target_height)
+    ox2 = round(0.5 * target_width)
+    oy2 = round(0.5 * target_height)
 
     for r in a:
-        r.x1 = round(jitter_scale*r.x1 - x1)
-        r.x2 = round(jitter_scale*r.x2 - x1)
+        r.x1 = round(jitter_scale * r.x1 - x1)
+        r.x2 = round(jitter_scale * r.x2 - x1)
 
-        r.y1 = round(jitter_scale*r.y1 - y1)
-        r.y2 = round(jitter_scale*r.y2 - y1)
+        r.y1 = round(jitter_scale * r.y1 - y1)
+        r.y2 = round(jitter_scale * r.y2 - y1)
 
         if r.x1 < 0:
             r.x1 = 0
@@ -167,11 +165,11 @@ def annotation_jitter(I, a_in, min_box_width=20, jitter_scale_min=0.9, jitter_sc
             r.y2 = I2.shape[0] - 1
 
         for p in r.point:
-            p.x = round(jitter_scale*p.x - x1)
-            p.y = round(jitter_scale*p.y - y1)
+            p.x = round(jitter_scale * p.x - x1)
+            p.y = round(jitter_scale * p.y - y1)
 
         # MA: make sure all points are inside the image
-        r.point = [p for p in r.point if p.x >=0 and p.y >=0 and p.x < I2.shape[1] and p.y < I2.shape[0]]
+        r.point = [p for p in r.point if p.x >= 0 and p.y >= 0 and p.x < I2.shape[1] and p.y < I2.shape[0]]
 
     new_rects = []
     for r in a.rects:
@@ -189,6 +187,7 @@ class Augmentations(object):
     """
     The class is intended to organise augmentation processes.
     """
+
     def __init__(self, hypes):
         """Constructs instance of augmentations pipeline.
         Args:
@@ -259,6 +258,7 @@ class Rotate90(object):
         Returns (list):
             The list of annotations for original image.
         """
+
         def inv(r):
             rotated_back = al.AnnoRect(width - r.y2, r.x1, width - r.y1, r.x2)
             rotated_back.score = r.score
